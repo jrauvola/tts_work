@@ -20,6 +20,11 @@ WORKDIR /app
 RUN python3 -m pip install --upgrade pip setuptools wheel
 COPY tts_native/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /app/requirements.txt
+
+# Bypass interactive TOS prompt from coqui-tts
+RUN mkdir -p /root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2 && \
+    echo "Agreed to Coqui terms via Dockerfile." > /root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/tos_agreed.txt
+
 COPY protos/gen/python /app/protos/gen/python
 COPY tts_common /app/tts_common
 COPY tts_native /app/tts_native

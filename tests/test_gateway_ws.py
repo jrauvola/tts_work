@@ -3,6 +3,8 @@ import json
 from typing import Any, Dict, List
 
 import pytest
+
+pytest_plugins = ["pytest_asyncio"]
 from starlette.websockets import WebSocketDisconnect
 
 import sys
@@ -246,8 +248,19 @@ async def test_gateway_handles_xtts_selection(monkeypatch):
     assert req.lang == "es"
 
 
-def test_xtts_backend_not_initialized(monkeypatch):
+def test_xtts_backend_initializes_without_env(monkeypatch):
     monkeypatch.setenv("TTS_BACKEND", "xtts")
     monkeypatch.delenv("XTTS_CONFIG_JSON", raising=False)
-    with pytest.raises(RuntimeError):
-        NativeAlignTTS()
+
+    called = {}
+
+    class DummyXttsBackend:
+        def __init__(self):
+            called["initialized"] = True
+
+    monkeypatch.setattr("tts_native.server.XttsBackend", DummyXttsBackend)
+
+    svc = NativeAlignTTS()
+
+    assert called.get("initialized") is True
+    assert "xtts" in svc._backends

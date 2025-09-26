@@ -24,3 +24,6 @@ voices/
 .vscode/
 .idea/
 .DS_Store
+
+models/
+*.wav

@@ -36,6 +36,9 @@ services:
       - "50052:50052"
     env_file:
       - ./.env
+    environment:
+      - COQUI_TOS_ACCEPTED=1
+      - COQUI_LICENSE_ACCEPTED=1
 
   prometheus:
     image: prom/prometheus:latest

@@ -68,10 +68,36 @@ class NativeAlignTTS(tts_pb2_grpc.TTSServiceServicer):
         text = req.text
         speaker_wav = req.params.get("speaker_wav") if req.params else None
         lang = req.params.get("lang") if req.params else None
+        # For XTTS, if a speaker path was provided but isn't accessible inside this process
+        # (e.g., a host path forwarded from a client), fall back to the backend default.
+        alignment_override: Optional[SynthesisResult] = None
         if backend_name == "xtts":
-            result: SynthesisResult = backend.synthesize(text, speaker_wav=speaker_wav, language=lang)  # type: ignore[attr-defined]
+            if speaker_wav and not os.path.exists(speaker_wav):
+                speaker_wav = None
+            try:
+                result: SynthesisResult = backend.synthesize(text, speaker_wav=speaker_wav, language=lang)  # type: ignore[attr-defined]
+            except Exception:
+                # On any synthesis failure, return an empty, single frame to keep stream semantics
+                return [SynthFrame(audio_frame=b"", alignments=[], is_last=True)]
+            if not result.alignments_ms:
+                try:
+                    tacotron = self._ensure_backend("coqui")
+                    alignment_override = tacotron.synthesize(text)  # type: ignore[attr-defined]
+                except Exception:
+                    alignment_override = None
         else:
-            result = backend.synthesize(text)  # type: ignore[attr-defined]
+            try:
+                result = backend.synthesize(text)  # type: ignore[attr-defined]
+            except Exception:
+                return [SynthFrame(audio_frame=b"", alignments=[], is_last=True)]
+
+        if alignment_override and alignment_override.alignments_ms:
+            result = SynthesisResult(
+                audio_44k=result.audio_44k,
+                sample_rate=result.sample_rate,
+                chars=alignment_override.chars or result.chars,
+                alignments_ms=alignment_override.alignments_ms,
+            )
         if result.audio_44k.size == 0:
             return [SynthFrame(audio_frame=b"", alignments=[], is_last=True)]
         frames = chunk_audio(result.audio_44k, result.sample_rate, FRAME_MS)
