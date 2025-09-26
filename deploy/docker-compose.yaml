@@ -1,0 +1,60 @@
+version: "3.9"
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+    image: tts-gateway:dev
+    environment:
+      - API_KEY=dev-key
+      - TEXTPROC_URL=http://textproc:8001
+      - TTS_NATIVE_ADDR=tts_native:50052
+    ports:
+      - "8000:8000"
+    depends_on:
+      - textproc
+      - tts_native
+    env_file:
+      - ./.env
+
+  textproc:
+    env_file:
+      - ./.env
+    build:
+      context: ..
+      dockerfile: textproc/Dockerfile
+    image: tts-textproc:dev
+    ports:
+      - "8001:8001"
+
+  tts_native:
+    build:
+      context: ..
+      dockerfile: tts_native/Dockerfile
+    image: tts-native:dev
+    ports:
+      - "50052:50052"
+    env_file:
+      - ./.env
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"
+      - "6831:6831/udp"
+
+

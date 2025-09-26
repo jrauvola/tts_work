@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: tts-gateway }
+  template:
+    metadata:
+      labels: { app: tts-gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: tts-gateway:dev
+          ports: [{ containerPort: 8000 }]
+          env:
+            - { name: API_KEY, value: dev-key }
+            - { name: TEXTPROC_URL, value: http://textproc:8001 }
+            - { name: TTS_CUSTOM_ADDR, value: tts-custom:50051 }
+            - { name: TTS_NATIVE_ADDR, value: tts-native:50052 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tts-gateway
+spec:
+  selector: { app: tts-gateway }
+  ports:
+    - port: 80
+      targetPort: 8000
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-textproc
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tts-textproc }
+  template:
+    metadata:
+      labels: { app: tts-textproc }
+    spec:
+      containers:
+        - name: textproc
+          image: tts-textproc:dev
+          ports: [{ containerPort: 8001 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: textproc
+spec:
+  selector: { app: tts-textproc }
+  ports:
+    - port: 8001
+      targetPort: 8001
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-custom
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tts-custom }
+  template:
+    metadata:
+      labels: { app: tts-custom }
+    spec:
+      containers:
+        - name: tts-custom
+          image: tts-custom:dev
+          ports: [{ containerPort: 50051 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tts-custom
+spec:
+  selector: { app: tts-custom }
+  ports:
+    - port: 50051
+      targetPort: 50051
+      name: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-native
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tts-native }
+  template:
+    metadata:
+      labels: { app: tts-native }
+    spec:
+      containers:
+        - name: tts-native
+          image: tts-native:dev
+          ports: [{ containerPort: 50052 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tts-native
+spec:
+  selector: { app: tts-native }
+  ports:
+    - port: 50052
+      targetPort: 50052
+      name: grpc
+
+

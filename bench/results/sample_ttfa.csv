@@ -1,0 +1,5 @@
+concurrency,model,p50_ms,p95_ms,qps
+1,coqui_native,448,620,1.7
+10,coqui_native,512,780,8.9
+10,chatterbox_modified,556,828,8.5
+

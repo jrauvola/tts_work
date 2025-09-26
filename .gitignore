@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Env
+.env
+.venv/
+.python-version
+
+# Build / cache
+*.log
+*.tmp
+*.cache/
+*.egg-info/
+
+# Audio/model artifacts
+models/XTTS-v2/*.pth
+models/XTTS-v2/samples/
+voices/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TTS Realtime UI</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 20px; }
+      .row { margin: 8px 0; }
+      textarea { width: 100%; height: 120px; }
+      #log { height: 150px; overflow: auto; background: #f7f7f7; padding: 8px; border: 1px solid #ddd; }
+      #alignments { height: 150px; overflow: auto; background: #fafafa; padding: 8px; border: 1px solid #ddd; }
+    </style>
+  </head>
+  <body>
+    <h2>Realtime TTS</h2>
+    <div class="row">
+      <label>Gateway WS URL: <input id="wsurl" value="ws://localhost:8000/ws?api_key=dev-key" size="50" /></label>
+    </div>
+    <div class="row">
+      <label>Sample Rate (playback only): <input id="sr" type="number" value="44100" /></label>
+    </div>
+    <div class="row">
+      <textarea id="text">Hello, this is a realtime test.</textarea>
+    </div>
+    <div class="row">
+      <label>Model:
+        <select id="model">
+          <option value="coqui" selected>Coqui (Tacotron2)</option>
+          <option value="xtts">XTTS-v2</option>
+        </select>
+      </label>
+    </div>
+    <div class="row" id="voice-row" style="display:none">
+      <label>Voice:
+        <select id="voice"></select>
+      </label>
+      <span id="voice-lang"></span>
+    </div>
+    <div class="row">
+      <button id="connect">Connect & Synthesize</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <div class="row">
+      <audio id="audio" controls></audio>
+    </div>
+    <div class="row">
+      <div><strong>Log</strong></div>
+      <div id="log"></div>
+    </div>
+    <div class="row">
+      <div><strong>Alignments</strong></div>
+      <div id="alignments"></div>
+    </div>
+    <script>
+      const log = (m) => { const el = document.getElementById('log'); el.textContent += m + "\n"; el.scrollTop = el.scrollHeight; };
+      const alin = (arr) => {
+        const el = document.getElementById('alignments');
+        if (!arr || !arr.length) {
+          return;
+        }
+        const latest = arr[arr.length - 1] || {};
+        el.dataset.alignState = JSON.stringify(latest);
+        el.textContent = JSON.stringify(latest, null, 2);
+        el.scrollTop = el.scrollHeight;
+      };
+      const toPCM16Buffer = (b64) => {
+        const raw = atob(b64);
+        const buf = new ArrayBuffer(raw.length);
+        const view = new Uint8Array(buf);
+        for (let i = 0; i < raw.length; i++) view[i] = raw.charCodeAt(i);
+        return buf;
+      };
+      let ws = null;
+      let mediaSource = null;
+      let sourceBuffer = null;
+      let audioQueue = [];
+      let audioEl = null;
+      let voices = [];
+
+      async function loadVoices() {
+        try {
+          const resp = await fetch('/voices.json');
+          if (resp.ok) {
+            voices = await resp.json();
+            renderVoiceOptions();
+          }
+        } catch (err) {
+          console.error('Failed to load voices', err);
+        }
+      }
+
+      function renderVoiceOptions() {
+        const voiceRow = document.getElementById('voice-row');
+        const select = document.getElementById('voice');
+        const langSpan = document.getElementById('voice-lang');
+        select.innerHTML = '';
+        voices.forEach((voice) => {
+          const opt = document.createElement('option');
+          opt.value = voice.path;
+          opt.textContent = voice.label;
+          opt.dataset.lang = voice.lang;
+          select.appendChild(opt);
+        });
+        select.onchange = () => {
+          const lang = select.selectedOptions[0]?.dataset?.lang || '';
+          langSpan.textContent = lang ? `Language: ${lang}` : '';
+        };
+        if (select.options.length) {
+          select.selectedIndex = 0;
+          select.onchange();
+        }
+        voiceRow.style.display = voices.length && document.getElementById('model').value === 'xtts' ? 'block' : 'none';
+      }
+
+      function appendNext() {
+        if (!sourceBuffer || sourceBuffer.updating) return;
+        const next = audioQueue.shift();
+        if (next) sourceBuffer.appendBuffer(next);
+      }
+
+      loadVoices();
+
+      document.getElementById('model').onchange = () => {
+        renderVoiceOptions();
+      };
+
+      document.getElementById('connect').onclick = async () => {
+        const url = document.getElementById('wsurl').value;
+        const sr = parseInt(document.getElementById('sr').value, 10) || 16000;
+        const text = document.getElementById('text').value;
+        const model = document.getElementById('model').value;
+        const speakerWav = model === 'xtts' ? document.getElementById('voice').value : '';
+        const lang = model === 'xtts' ? document.getElementById('voice').selectedOptions[0]?.dataset?.lang || 'en' : 'en';
+        audioEl = document.getElementById('audio');
+        document.getElementById('alignments').textContent = '';
+        delete document.getElementById('alignments').dataset.sessionId;
+        delete document.getElementById('alignments').dataset.alignState;
+        // For PCM16, use webm/pcm hack via MediaSource is non-trivial; fallback to WAV assembly per session
+        const samples = [];
+        const wavParts = [];
+        const toWav = (buffers) => {
+          const numSamples = buffers.reduce((a,b)=>a + (b.byteLength/2), 0);
+          const bytes = 44 + numSamples*2;
+          const wav = new ArrayBuffer(bytes);
+          const dv = new DataView(wav);
+          const writeStr = (o, s) => { for (let i=0;i<s.length;i++) dv.setUint8(o+i, s.charCodeAt(i)); };
+          writeStr(0,'RIFF'); dv.setUint32(4, bytes-8, true); writeStr(8,'WAVE');
+          writeStr(12,'fmt '); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+          dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+          writeStr(36,'data'); dv.setUint32(40,numSamples*2,true);
+          let off=44; buffers.forEach(b=>{ new Uint8Array(wav, off, b.byteLength).set(new Uint8Array(b)); off+=b.byteLength; });
+          return new Blob([wav], {type:'audio/wav'});
+        };
+
+        ws = new WebSocket(url);
+        document.getElementById('stop').disabled = false;
+        ws.onopen = () => {
+          log('WS open');
+          const baseMsg = { model, speaker_wav: speakerWav, lang };
+          ws.send(JSON.stringify({ ...baseMsg, text: ' ', flush: false }));
+          ws.send(JSON.stringify({ ...baseMsg, text, flush: true }));
+          ws.send(JSON.stringify({ ...baseMsg, text: '', flush: true }));
+        };
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.audio) {
+            if (msg.ttfa_ms) log(`TTFA: ${msg.ttfa_ms.toFixed(1)} ms`);
+            if (msg.alignment) alin([msg.alignment]);
+            samples.push(toPCM16Buffer(msg.audio));
+          } else if (msg.error) {
+            log(`Error: ${msg.error}`);
+          }
+        };
+        ws.onclose = () => {
+          log('WS closed');
+          delete document.getElementById('alignments').dataset.sessionId;
+          delete document.getElementById('alignments').dataset.alignState;
+          if (samples.length) {
+            const blob = toWav(samples);
+            const url = URL.createObjectURL(blob);
+            audioEl.src = url;
+            audioEl.play();
+          }
+        };
+      };
+
+      document.getElementById('stop').onclick = () => { try { ws && ws.close(); } catch (e) {} };
+    </script>
+  </body>
+  </html>
+

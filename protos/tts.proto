@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package tts;
+
+enum AudioEncoding {
+  AUDIO_ENCODING_UNSPECIFIED = 0;
+  PCM16 = 1;
+  OPUS = 2;
+}
+
+enum ModelBackend {
+  MODEL_BACKEND_UNSPECIFIED = 0;
+  MODEL_BACKEND_COQUI = 1;
+  MODEL_BACKEND_XTTS = 2;
+}
+
+message CharAlignment {
+  uint32 char_index = 1;
+  string grapheme = 2;
+  double start_ms = 3;
+  double duration_ms = 4;
+}
+
+message SynthesizeRequest {
+  string request_id = 1;
+  uint32 chunk_index = 2;
+  string text = 3;
+  string voice = 4;
+  AudioEncoding encoding = 5;
+  uint32 sample_rate_hz = 6;
+  string lang = 7;
+  uint64 seed = 8;
+  ModelBackend backend = 9;
+  string speaker_wav = 10;
+}
+
+message AudioFormat {
+  AudioEncoding encoding = 1;
+  uint32 sample_rate_hz = 2;
+  uint32 frame_ms = 3;
+}
+
+message SynthesizeResponse {
+  string request_id = 1;
+  uint32 chunk_index = 2;
+  bytes audio_frame = 3;
+  AudioFormat format = 4;
+  repeated CharAlignment alignments = 5;
+  bool is_last = 6;
+  uint32 frames_sent = 7;
+}
+
+service TTSService {
+  rpc SynthesizeStream(SynthesizeRequest) returns (stream SynthesizeResponse);
+}
+
